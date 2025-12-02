@@ -40,9 +40,12 @@ Your task is to analyze this data and produce a comprehensive report (`report.md
 * **User Input Flow:** Describe the intended flow of user input (e.g., "Input is read via `read`, passed to a parser, then hashed").
 * **Constraint:** Do not go into deep detail about individual functions here; focus on the "Big Picture" logic and intended behavior.
 
-**Part 2: Deep Analysis & Vulnerability Identification**
-* **Function Analysis:** Go through the provided functions carefully. Highlight any that behave in unusual or suspicious ways.
-* **Vulnerability Spotting:** Identify bugs (Buffer Overflows, Format Strings, Logic Errors, Race Conditions). Describe *where* they are (function/line) and *why* they are vulnerabilities, but save the full exploit chain/method for Part 3.
+**Part 2: Deep Function-by-Function Analysis**
+* **Requirement:** You MUST provide a detailed breakdown for every significant function found in the dump.
+* **Format:** Use the following specific format for each entry:
+    > **FUNCTION `<name>` (`<address>`):**
+    > This function takes [describe arguments, e.g., `a1` as a user struct pointer]. It performs [describe logic, e.g., RC4 encryption on `a1->password` using a global key]. It returns [describe return value].
+* **Vulnerability Spotting:** Inside these descriptions, explicitly highlight any suspicious logic (e.g., "The `memcpy` at line 15 uses a user-controlled size `v4` without bounds checking").
 * **Structure Recovery:** Provide a **visual description** of all structs you identify during analysis (e.g., "Struct at `v4`: Offset 0=int, Offset 8=char*"). Format these clearly so they can be manually added to IDA's Local Types window.
 
 **Part 3: The Win Strategy**
@@ -77,7 +80,7 @@ ACTUATOR_PROMPT_APPEND = """
 
 ### PART 4: Database Improvements (Actuator JSON)
 Since you have access to Disassembly, you can suggest direct improvements to the IDA Database to make it clearer for the analyst.
-If you identify functions to rename, comments to add, or structs to define:
+If you identify functions to rename, comments to add, prototypes to update, or structs to define:
 1. **Generate a JSON block** at the very end of your response.
 2. Strictly follow the **Actuator JSON API** documented in the `<actuator_documentation>` section below.
 3. This will allow the analyst to automatically apply your reverse engineering findings to the database.
@@ -85,11 +88,11 @@ If you identify functions to rename, comments to add, or structs to define:
 
 ACTUATOR_DOCS = """# IDA Actuator JSON API
 
-If you identify opportunities to improve the database (renaming functions, defining structures, or commenting), output a JSON block at the end of your response.
+If you identify opportunities to improve the database (renaming functions, defining structures, commenting, or fixing function prototypes), output a JSON block at the end of your response.
 
 **Rules:**
 1. Use **Hexadecimal Strings** for addresses (e.g., "0x401000").
-2. For Structs, use valid **C Syntax**.
+2. For Structs and Types, use valid **C Syntax**.
 3. Do not include comments inside the JSON itself (standard JSON only).
 
 ## JSON Schema
@@ -103,6 +106,11 @@ If you identify opportunities to improve the database (renaming functions, defin
       "name": "rc4_encrypt_loop"
     },
     {
+      "type": "set_type",
+      "address": "0x401234",
+      "definition": "int __cdecl rc4_encrypt_loop(RC4_Context* ctx, char* buffer, int len)"
+    },
+    {
       "type": "comment",
       "address": "0x401234",
       "content": "XORs input byte with key byte",
@@ -110,8 +118,8 @@ If you identify opportunities to improve the database (renaming functions, defin
     },
     {
       "type": "create_struct",
-      "name": "PlayerState",
-      "definition": "struct PlayerState { int id; char username[32]; int hp; };"
+      "name": "RC4_Context",
+      "definition": "struct RC4_Context { int x; int y; uint8_t sbox[256]; };"
     }
   ]
 }
@@ -124,12 +132,17 @@ Renames a function or global variable.
 * `address`: The effective address (EA) from the dump.
 * `name`: The new name (no spaces, use underscores).
 
-### 2. `create_struct`
+### 2. `set_type`
+Applies a C function prototype or variable type to an address. Use this to assign structs to function arguments.
+* `address`: The function start address or global variable address.
+* `definition`: The full C declaration. (e.g., `MyStruct* func(int a)`).
+
+### 3. `create_struct`
 Defines a C structure in the Local Types window.
 * `name`: The name of the struct.
 * `definition`: The full C-style struct definition string. Ensure you use standard types (`int`, `char`, `long`, `uint8_t`, etc.).
 
-### 3. `comment`
+### 4. `comment`
 Adds a comment to a specific instruction or function start.
 * `address`: Where to place the comment.
 * `content`: The text.
