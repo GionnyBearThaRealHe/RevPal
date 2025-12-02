@@ -1,63 +1,112 @@
-# **IDA Dump Tool for LLM Analysis**
+# **RevPal**
 
-A command-line utility designed to extract comprehensive analysis data from **IDA Pro 9.0+** databases. This tool generates context-rich dumps (decompilation, disassembly, memory layout, and security mitigations) formatted specifically to assist Large Language Models (LLMs) in solving CTF challenges and performing reverse engineering tasks.
+A comprehensive "Agentic" interface for IDA Pro 9.0+. This toolset bridges the gap between IDA Pro and Large Language Models (LLMs), allowing for a bidirectional workflow: extracting deep analysis context for the AI, and applying the AI's reverse engineering findings back into the database.
 
 ## **Features**
 
-* **Smart Analysis:** Automatically loads existing .i64 databases or analyzes raw binaries from scratch.  
-* **Context-Aware Dumping:** Extracts Functions (Decompilation \+ Disassembly), Structures, Global Variables, Imports/Exports, and Strings.  
-* **LLM Optimization:** Filters out compiler boilerplate and library functions to save token space.  
-* **Prompt Generation:** Can generate a ready-to-use "Master Prompt" for ChatGPT/Claude, including a custom challenge description.  
-* **Security Analysis:** Automated checksec-style detection for Canary, NX, and PIE.
+* **XML-Based Context Dumps:** Generates structured XML datasets optimized for LLM parsing, containing code, memory layout, and types.  
+* **System Prompt Embedding:** Automatically embeds a "Master CTF System Prompt" and challenge descriptions into the dump, creating a single ready-to-paste file.  
+* **The Actuator:** A "Load" command that parses JSON output from the LLM to safely rename functions, define structures, and fix prototypes in your IDB.  
+* **Safety First:** Automatic timestamped backups before the AI modifies your database.  
+* **Smart Analysis:** Filters out compiler boilerplate and library functions to save token budget.
 
 ## **Requirements**
 
 * **IDA Pro 9.0** or later (Required for idalib support).  
 * **Python 3** installed on the host system.  
-* **Root/Sudo access** (Only for the initial installer script).
+* **Root/Sudo access** (For installation only).
 
 ## **Installation**
 
 1. Activate idalib:  
-   Before using this tool, you must ensure the IDA Python library is linked to your Python installation. Run the activation script included with IDA:  
-   \# Windows  
-   python "C:\\Program Files\\IDA Pro 9.0\\idalib\\python\\py-activate-idalib.py"
-
+   Ensure the IDA Python library is linked. Run the activation script included with IDA:  
    \# Linux / macOS  
    sudo python3 /opt/ida-9.0/idalib/python/py-activate-idalib.py
 
-2. Install the Tool:  
-   Run the provided installer to verify dependencies and create a global command:  
-   chmod \+x setup.sh  
-   sudo ./setup.sh
+2. Install the Suite:  
+   Run the installer script:  
+   chmod \+x install.sh  
+   sudo ./install.sh
 
 ## **Usage**
 
-Run the tool from any directory against a binary or database file.  
-ida-dump ./target\_binary \[flags\]
+The tool operates via two subcommands: dump (Extract) and load (Act).
 
-### **Flags**
+### **1\. Dump (Extract Analysis)**
+
+Analyzes a binary or existing database and produces an XML file for the LLM.  
+revpal dump \<target\_file\> \[flags\]
+
+**Flags:**
 
 | Flag | Description |
 | :---- | :---- |
-| \-p, \--prompt | **Recommended:** Generates a .md file containing a "Master CTF Prompt" tailored for LLMs, with the dump attached as a code block. |
-| \-d "\<text\>" | Inserts a challenge description into the generated prompt (requires \-p). |
-| \--disasm | Includes assembly instructions alongside pseudocode (increases file size significantly). |
-| \--minimal | Minimal dump: Only filtered functions (no data segments, structs, or boilerplate). |
-| \--all | Raw dump: Includes EVERYTHING (library functions, thunks, standard boilerplate, etc). |
+| \-p, \--prompt | **Highly Recommended:** Embeds the "Master CTF System Prompt" into the XML. This instructs the LLM on how to analyze the file and format its response. |
+| \-d "description" | Inserts specific context (e.g., "This is a heap exploitation challenge on port 1337"). |
+| \--disasm | Includes raw disassembly alongside pseudocode. **Required** if you want the LLM to perform Actuator operations (renaming/fixing). |
+| \--minimal | Reduces output size by skipping data segments and boilerplate functions. |
 
-### **Examples**
+**Example:**  
+revpal dump ./chall.exe \-p \--disasm \-d "Find the flag. The binary uses a custom crypto algorithm."
 
-1\. Standard CTF Workflow:  
-Generate a markdown report ready to paste into ChatGPT, including the challenge description.  
-ida-dump ./crackme \-p \-d "Find the password. The binary listens on port 1337."
+*Output: chall.exe\_dump.xml*
 
-*Output: crackme\_dump.md*  
-2\. Quick Analysis (Text only):  
-Just get the code and data in a text file.  
-ida-dump ./malware.exe
+### **2\. Load (The Actuator)**
 
-*Output: malware.exe\_dump.txt*  
-3\. Deep Dive:  
-Include disassembly and all compiler boilerplate for thorough inspection.  
-ida-dump ./kernel\_module.ko \--all \--disasm  
+Takes a JSON file generated by the LLM and applies the changes to your IDA database.  
+revpal load \<target\_file\> \<changes.json\>
+
+**What it does:**
+
+1. Creates a backup (.bak) of your database.  
+2. Renames functions and global variables.  
+3. Defines new C-style Structures in Local Types.  
+4. Applies comments to assembly and pseudocode.  
+5. Updates function prototypes (arguments/return types).
+
+**Example:**  
+revpal load ./chall.exe llm\_response.json
+
+## **The Agentic Workflow**
+
+This tool is designed for a specific loop:
+
+1. Generate Context:  
+   Run dump with the \-p flag.  
+   revpal dump ./crackme \-p \--disasm
+
+2. Feed the LLM:  
+   Upload the resulting .xml file to your chatbot. The file contains instructions telling the AI to:  
+   * Analyze the binary.  
+   * Find vulnerabilities.  
+   * **Generate an Actuator JSON block** at the end of its response.  
+3. Extract & Apply:  
+   Copy the JSON block from the LLM's response into a file (e.g., fix.json).  
+   Run the load command to apply the reverse engineering work:  
+   revpal load ./crackme fix.json
+
+4. Open IDA:  
+   Open the .i64 file. You will see renamed functions, commented code, and recovered structures waiting for you.
+
+## **Actuator JSON Format**
+
+If you wish to write manual changes or debug the LLM output, here is the schema:  
+{  
+  "actions": \[  
+    {  
+      "type": "rename",  
+      "address": "0x401000",  
+      "name": "check\_password"  
+    },  
+    {  
+      "type": "create\_struct",  
+      "name": "User",  
+      "definition": "struct User { int id; char name\[32\]; };"  
+    },  
+    {  
+      "type": "set\_type",  
+      "address": "0x401000",  
+      "definition": "int check\_password(User\* u);"  
+    }  
+  \]  
+}  
