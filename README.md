@@ -25,8 +25,8 @@ A comprehensive "Agentic" interface for IDA Pro 9.0+. This toolset bridges the g
 
 2. Install the Suite:  
    Run the installer script:  
-   chmod \+x install.sh  
-   sudo ./install.sh
+   chmod \+x setup.sh  
+   sudo ./setup.sh
 
 ## **Usage**
 
