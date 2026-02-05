@@ -302,25 +302,99 @@ def dump_global_data(f):
     f.write('  <global_data>\n')
     for n in range(ida_segment.get_segm_qty()):
         seg = ida_segment.getnseg(n)
-        if seg.type not in [ida_segment.SEG_DATA, ida_segment.SEG_BSS]: continue
+        seg_name = ida_segment.get_segm_name(seg)
         
-        f.write(f'    <segment_data name="{ida_segment.get_segm_name(seg)}">\n')
-        for head in idautils.Heads(seg.start_ea, seg.end_ea):
-            if not ida_bytes.is_data(ida_bytes.get_flags(head)): continue
-            name = ida_name.get_name(head)
-            if not name: continue
+        # FIX: Expanded check for .data/.rodata/.bss/.rdata names
+        # Captures segments like .rodata.str1.1 even if type isn't standard
+        lower_name = seg_name.lower()
+        is_interesting = seg.type in [ida_segment.SEG_DATA, ida_segment.SEG_BSS]
+        
+        known_data_names = {".data", ".rodata", ".bss", ".rdata", ".data1", ".const", "__const", "__data"}
+        if any(name in lower_name for name in known_data_names):
+            is_interesting = True
             
-            size = ida_bytes.get_item_size(head)
-            val_str = ""
-            if ida_bytes.is_strlit(ida_bytes.get_flags(head)):
-                val_str = f'"{idc.get_strlit_contents(head)}"'
-            elif size == 1: val_str = hex(ida_bytes.get_byte(head))
-            elif size == 2: val_str = hex(ida_bytes.get_word(head))
-            elif size == 4: val_str = hex(ida_bytes.get_dword(head))
-            elif size == 8: val_str = hex(ida_bytes.get_qword(head))
-            else: val_str = f"[Block of {size} bytes]"
+        if not is_interesting: continue
+        
+        f.write(f'    <segment_data name="{seg_name}">\n')
+        
+        current_ea = seg.start_ea
+        end_ea = seg.end_ea
+        
+        while current_ea < end_ea:
+            flags = ida_bytes.get_flags(current_ea)
             
-            f.write(f'      <item addr="{hex(head)}" name="{name}" size="{size}">{cdata(val_str)}</item>\n')
+            # 1. Skip Code
+            if ida_bytes.is_code(flags):
+                current_ea += ida_bytes.get_item_size(current_ea)
+                continue
+                
+            # 2. Handle Defined Data
+            if ida_bytes.is_data(flags):
+                head = current_ea
+                size = ida_bytes.get_item_size(head)
+                
+                name = ida_name.get_name(head)
+                if not name: name = f"unk_{head:x}"
+                
+                val_str = ""
+                ref_attr = ""
+                
+                # Resolve Pointers/References
+                if size == 4 or size == 8:
+                    ptr_val = ida_bytes.get_qword(head) if size == 8 else ida_bytes.get_dword(head)
+                    if ida_bytes.is_loaded(ptr_val):
+                        tgt_name = ida_name.get_name(ptr_val)
+                        if tgt_name:
+                            ref_attr = f' refers_to="{tgt_name}"'
+                        else:
+                            ref_attr = f' refers_to="unk_{ptr_val:x}"'
+
+                if ida_bytes.is_strlit(flags):
+                    try:
+                        raw_content = idc.get_strlit_contents(head)
+                        if raw_content:
+                            val_str = f'"{raw_content.decode("utf-8", "ignore")}"'
+                    except:
+                        val_str = '"<encoding error>"'
+                elif size == 1: val_str = hex(ida_bytes.get_byte(head))
+                elif size == 2: val_str = hex(ida_bytes.get_word(head))
+                elif size == 4: val_str = hex(ida_bytes.get_dword(head))
+                elif size == 8: val_str = hex(ida_bytes.get_qword(head))
+                else:
+                    if size <= 4096:
+                        data = ida_bytes.get_bytes(head, size)
+                        if data: val_str = data.hex()
+                    else:
+                        val_str = f"[Block of {size} bytes]"
+                
+                f.write(f'      <item addr="{hex(head)}" name="{name}" size="{size}"{ref_attr}>{cdata(val_str)}</item>\n')
+                current_ea += size
+                continue
+            
+            # 3. Handle Undefined / Gaps
+            # Find the start of the next defined item to identify the gap size
+            next_defined = ida_bytes.next_head(current_ea, end_ea)
+            if next_defined == idc.BADADDR:
+                next_defined = end_ea
+            
+            # Sanity check to force progress
+            if next_defined <= current_ea:
+                next_defined = current_ea + 1
+
+            # Dump the undefined gap in chunks (to keep XML readable)
+            MAX_CHUNK = 1024
+            temp_ea = current_ea
+            
+            while temp_ea < next_defined:
+                this_size = min(MAX_CHUNK, next_defined - temp_ea)
+                data = ida_bytes.get_bytes(temp_ea, this_size)
+                val_str = data.hex() if data else ""
+                name = f"unk_{temp_ea:x}"
+                f.write(f'      <item addr="{hex(temp_ea)}" name="{name}" size="{this_size}" type="undefined">{cdata(val_str)}</item>\n')
+                temp_ea += this_size
+            
+            current_ea = next_defined
+
         f.write('    </segment_data>\n')
     f.write('  </global_data>\n')
 
